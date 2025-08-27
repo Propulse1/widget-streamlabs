@@ -1,45 +1,38 @@
-cat > api/fixtures/team-last.js <<'EOF'
 export default async function handler(req, res) {
+  const { teamId } = req.query;
+  const API_TOKEN = process.env.SPORTMONKS_API_TOKEN;
+
+  if (!teamId) {
+    return res.status(400).json({ message: "Paramètre teamId manquant" });
+  }
+
   try {
-    const { teamId, seasonId, leagueId } = req.query;
-    if (!teamId) {
-      return res.status(400).json({ message: 'Paramètre teamId requis' });
+    // Forcer Liga saison 2025/26 (25659)
+    const url = `https://api.sportmonks.com/v3/football/fixtures?api_token=${API_TOKEN}&include=participants;scores&filter=teams:${teamId};season_id:25659;state_id:5&sort=-starting_at&per_page=1`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!data.data || data.data.length === 0) {
+      return res.status(404).json({ message: "Aucun match terminé trouvé pour cette équipe", teamId });
     }
 
-    // Filtres Sportmonks: match terminé + équipe
-    const filters = [`teams:${teamId}`, 'state_id:5'];
-    if (seasonId) filters.push(`season_id:${seasonId}`);
-    if (leagueId)  filters.push(`league_id:${leagueId}`);
+    const fx = data.data[0];
+    const home = fx.participants.find(p => p.meta.location === "home");
+    const away = fx.participants.find(p => p.meta.location === "away");
 
-    const url = `https://soccer.sportmonks.com/api/v3/football/fixtures`;
-    const params = new URLSearchParams({
-      include: 'participants;scores;events;periods;league;round;venue',
-      per_page: '1',
-      sort: '-starting_at',
-      api_token: process.env.SPORTMONKS_TOKEN,
+    const score_home = fx.scores.find(sc => sc.description === "CURRENT" && sc.participant_id === home.id)?.score.goals ?? 0;
+    const score_away = fx.scores.find(sc => sc.description === "CURRENT" && sc.participant_id === away.id)?.score.goals ?? 0;
+
+    return res.status(200).json({
+      match: fx.name,
+      date: fx.starting_at,
+      home: home.name,
+      away: away.name,
+      score_home,
+      score_away,
     });
-
-    // Ajout des filtres correctement (Sportmonks veut filter[...])
-    filters.forEach((f, i) => {
-      params.append(`filters[${i}]`, f);
-    });
-
-    const r = await fetch(`${url}?${params.toString()}`);
-    const data = await r.json();
-
-    const list = Array.isArray(data?.data) ? data.data : [];
-    if (list.length > 0) {
-      return res.status(200).json({ fixture: list[0] });
-    }
-
-    return res.status(404).json({
-      message: 'Aucun match terminé trouvé pour cette équipe',
-      teamId,
-      seasonId: seasonId || null,
-      leagueId: leagueId || null,
-    });
-  } catch (e) {
-    return res.status(500).json({ message: 'Erreur serveur', error: String(e) });
+  } catch (error) {
+    return res.status(500).json({ message: "Erreur serveur", error: error.message });
   }
 }
-EOF
