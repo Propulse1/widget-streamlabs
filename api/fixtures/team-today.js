@@ -1,79 +1,43 @@
 // api/fixtures/team-today.js
 export default async function handler(req, res) {
   try {
-    const token = process.env.SPORTMONKS_TOKEN;
-    if (!token) {
-      return res.status(500).json({ message: "SPORTMONKS_TOKEN manquant dans Vercel > Settings > Environment Variables" });
+    const { teamId, date } = req.query;
+
+    if (!teamId || !/^\d+$/.test(teamId)) {
+      return res.status(400).json({ message: "Paramètre teamId requis (entier)." });
     }
 
-    // Params
-    const teamId = (req.query.teamId ?? "83").trim(); // 83 = FC Barcelona
-    const dateParam = (req.query.date ?? "").trim();  // format YYYY-MM-DD (optionnel)
+    // date optionnelle : YYYY-MM-DD. Par défaut : aujourd’hui en UTC.
+    const d = date || new Date().toISOString().slice(0, 10);
 
-    // Validations simples
-    if (!/^\d+$/.test(teamId)) {
-      return res.status(400).json({ message: "Paramètre teamId invalide (entier attendu)" });
-    }
-    if (dateParam && !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
-      return res.status(400).json({ message: "Paramètre date invalide (attendu YYYY-MM-DD)" });
+    const TOKEN = process.env.SPORTMONKS_TOKEN;
+    if (!TOKEN) {
+      return res.status(500).json({ message: "SPORTMONKS_TOKEN manquant" });
     }
 
-    // Fenêtre de recherche = la journée (UTC) de 'date' ou d'aujourd'hui
-    const now = dateParam ? new Date(`${dateParam}T00:00:00Z`) : new Date();
-    const y = now.getUTCFullYear();
-    const m = String(now.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(now.getUTCDate()).padStart(2, "0");
-
-    const from = `${y}-${m}-${d} 00:00:00`;
-    const to   = `${y}-${m}-${d} 23:59:59`;
-
-    // Sportmonks v3 — on cherche les fixtures du jour pour cette équipe
-    // NB: selon les plans Sportmonks, le filtre peut être 'team_ids' ou 'teams'.
-    // On tente d'abord team_ids puis on fallback.
     const base = "https://api.sportmonks.com/v3/football";
-    const commonQuery =
-      "include=participants;league;round;venue;scores;events;periods&tz=UTC";
+    // IMPORTANT : on filtre par participants:TEAM_ID
+    const url =
+      `${base}/fixtures/date/${d}` +
+      `?include=scores;participants;league;round;venue;events;periods` +
+      `&filters=participants:${teamId}` +
+      `&api_token=${encodeURIComponent(TOKEN)}`;
 
-    const urlsToTry = [
-      `${base}/fixtures/between/${encodeURIComponent(from)}/${encodeURIComponent(to)}?${commonQuery}&team_ids=${teamId}&api_token=${token}`,
-      `${base}/fixtures/between/${encodeURIComponent(from)}/${encodeURIComponent(to)}?${commonQuery}&teams=${teamId}&api_token=${token}`,
-      // fallback alternatif: par date + équipe (si l’endpoint est dispo sur ton plan)
-      `${base}/fixtures/date/${y}-${m}-${d}?${commonQuery}&team_ids=${teamId}&api_token=${token}`,
-    ];
+    const r = await fetch(url, { headers: { Accept: "application/json" } });
+    const json = await r.json();
 
-    let data = null;
-    let lastStatus = 0;
+    // json.data peut être un tableau (matches ce jour) ou vide
+    const list = Array.isArray(json.data) ? json.data : [];
+    // On prend le premier match trouvé ce jour (ou choisis-en un autre critère si tu veux)
+    const fx = list[0];
 
-    for (const url of urlsToTry) {
-      const r = await fetch(url);
-      lastStatus = r.status;
-      if (r.ok) {
-        const j = await r.json();
-        // Sportmonks renvoie souvent {data: [...] }
-        const payload = Array.isArray(j) ? j : j?.data;
-        if (Array.isArray(payload) && payload.length > 0) {
-          data = payload;
-          break;
-        }
-      }
+    if (!fx) {
+      return res.status(200).json({ message: "Pas de match pour cette équipe à cette date", date: d });
     }
 
-    if (!data) {
-      return res.status(200).json({
-        message: `Pas de match pour l'équipe ${teamId} à la date ${y}-${m}-${d}`,
-        lastStatus
-      });
-    }
-
-    // S’il y a plusieurs fixtures dans la journée, on renvoie le premier à venir,
-    // sinon le premier.
-    const nowTs = Date.now() / 1000;
-    const sorted = [...data].sort((a, b) => (a.starting_at_timestamp ?? 0) - (b.starting_at_timestamp ?? 0));
-    const upcoming = sorted.find(fx => (fx.starting_at_timestamp ?? 0) >= nowTs) || sorted[0];
-
-    return res.status(200).json({ fixture: upcoming });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: "Erreur serveur", error: String(err) });
+    return res.status(200).json({ fixture: fx, date: d });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ message: "Erreur serveur", error: String(e) });
   }
 }
