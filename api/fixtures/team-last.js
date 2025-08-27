@@ -11,19 +11,23 @@ export default async function handler(req, res) {
     if (seasonId) filters.push(`season_id:${seasonId}`);
     if (leagueId)  filters.push(`league_id:${leagueId}`);
 
+    const url = `https://soccer.sportmonks.com/api/v3/football/fixtures`;
     const params = new URLSearchParams({
       include: 'participants;scores;events;periods;league;round;venue',
-      filters: filters.join(';'),
-      per_page: '1',          // ne garder que le plus récent
-      sort: '-starting_at',   // le plus récent d'abord
+      per_page: '1',
+      sort: '-starting_at',
       api_token: process.env.SPORTMONKS_TOKEN,
     });
 
-    const url = `https://soccer.sportmonks.com/api/v3/football/fixtures?${params.toString()}`;
-    const r = await fetch(url);
+    // Ajout des filtres correctement (Sportmonks veut filter[...])
+    filters.forEach((f, i) => {
+      params.append(`filters[${i}]`, f);
+    });
+
+    const r = await fetch(`${url}?${params.toString()}`);
     const data = await r.json();
 
-    const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+    const list = Array.isArray(data?.data) ? data.data : [];
     if (list.length > 0) {
       return res.status(200).json({ fixture: list[0] });
     }
