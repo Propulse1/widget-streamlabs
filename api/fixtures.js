@@ -1,27 +1,36 @@
-// api/fixtures.js
-
+// /api/fixtures.js (Vercel Serverless Function)
 export default async function handler(req, res) {
   try {
-    // Ton token Sportmonks est stocké dans Vercel → Environment Variables
+    // Lis le token depuis Vercel (Settings > Environment Variables)
     const token = process.env.SPORTMONKS_TOKEN;
-
-    // Exemple d’appel à l’API Sportmonks
-    const response = await fetch(
-      `https://api.sportmonks.com/v3/football/fixtures?api_token=${token}`
-    );
-
-    if (!response.ok) {
-      throw new Error(`Sportmonks API error: ${response.status}`);
+    if (!token) {
+      return res.status(500).json({ error: 'SPORTMONKS_TOKEN manquant' });
     }
 
-    const data = await response.json();
+    // Construit l’URL Sportmonks (ex : fixtures du jour + includes utiles)
+    const params = new URLSearchParams({
+      api_token: token,
+      include: 'participants;events',   // adapte selon tes besoins
+      // Exemple de filtres possibles :
+      // 'filters': 'league_id:301' 
+    });
 
-    res.status(200).json(data);
-  } catch (error) {
-    console.error(error);
+    const url = `https://api.sportmonks.com/v3/football/fixtures?${params.toString()}`;
 
-    // Si l’API Sportmonks plante → fallback vers ton JSON statique
-    const fallback = await import("../public/data/fixtures.json");
-    res.status(200).json(fallback.default || fallback);
+    const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!r.ok) {
+      const text = await r.text();
+      return res.status(r.status).json({ error: 'Upstream error', detail: text });
+    }
+
+    const data = await r.json();
+    // Optionnel : CORS si tu appelles depuis un overlay navigateur
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    // Optionnel : cache léger
+    res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=60');
+
+    return res.status(200).json(data);
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || 'Server error' });
   }
 }
