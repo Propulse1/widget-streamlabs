@@ -1,0 +1,11 @@
+:root { font-family: system-ui, sans-serif; }
+#board { display: grid; gap: 8px; padding: 12px; }
+.card {
+  display:flex; align-items:center; gap:12px;
+  border:1px solid #333; border-radius:12px; padding:10px 14px;
+  background: rgba(0,0,0,.55); color:#fff;
+}
+.badge { font-weight:700; padding:2px 8px; border-radius:999px; background:#09f; }
+.name { flex:1 }
+.score { font-size:20px; font-weight:800; }
+.small { opacity:.8; font-size:12px }
