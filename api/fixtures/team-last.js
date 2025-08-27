@@ -1,55 +1,41 @@
-// /api/fixtures/team-last.js
-// Renvoie le DERNIER match terminé pour une équipe (teamId)
-// Ex.: /api/fixtures/team-last?teamId=83
-
+cat > api/fixtures/team-last.js <<'EOF'
 export default async function handler(req, res) {
   try {
-    const { teamId } = req.query;
-    if (!teamId || isNaN(Number(teamId))) {
-      res.status(400).json({ message: "Paramètre 'teamId' requis (nombre)", example: "/api/fixtures/team-last?teamId=83" });
-      return;
+    const { teamId, seasonId, leagueId } = req.query;
+    if (!teamId) {
+      return res.status(400).json({ message: 'Paramètre teamId requis' });
     }
 
-    const token = process.env.SPORTMONKS_TOKEN;
-    if (!token) {
-      res.status(500).json({ message: "SPORTMONKS_TOKEN manquant dans les variables d'environnement Vercel" });
-      return;
-    }
+    // Filtres Sportmonks: match terminé + équipe
+    const filters = [`teams:${teamId}`, 'state_id:5'];
+    if (seasonId) filters.push(`season_id:${seasonId}`);
+    if (leagueId)  filters.push(`league_id:${leagueId}`);
 
-    // On récupère le dernier match TERMINÉ (state_id = 5) pour l'équipe
-    // Tri descendant sur la date de début et on limite à 1 résultat
     const params = new URLSearchParams({
-      api_token: token,
-      include: [
-        "participants",
-        "scores",
-        "periods",
-        "league",
-        "round",
-        "venue"
-      ].join(","),
-      // filtres: équipe + terminé
-      filters: `teams:${teamId};state_id:5`,
-      // tri décroissant par date
-      sort: "-starting_at",
-      per_page: "1"
+      include: 'participants;scores;events;periods;league;round;venue',
+      filters: filters.join(';'),
+      per_page: '1',          // ne garder que le plus récent
+      sort: '-starting_at',   // le plus récent d'abord
+      api_token: process.env.SPORTMONKS_TOKEN,
     });
 
     const url = `https://soccer.sportmonks.com/api/v3/football/fixtures?${params.toString()}`;
-    const r = await fetch(url, { headers: { Accept: "application/json" } });
-    const json = await r.json();
+    const r = await fetch(url);
+    const data = await r.json();
 
-    const fixture = json?.data?.[0];
-    if (!fixture) {
-      res.status(404).json({ message: "Aucun match terminé trouvé pour cette équipe", teamId });
-      return;
+    const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+    if (list.length > 0) {
+      return res.status(200).json({ fixture: list[0] });
     }
 
-    // Cache côté Vercel (CDN) 60s pour éviter de sur-solliciter l'API
-    res.setHeader("Cache-Control", "s-maxage=60, stale-while-revalidate=30");
-    res.status(200).json({ fixture });
+    return res.status(404).json({
+      message: 'Aucun match terminé trouvé pour cette équipe',
+      teamId,
+      seasonId: seasonId || null,
+      leagueId: leagueId || null,
+    });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ message: "Erreur serveur", error: String(e) });
+    return res.status(500).json({ message: 'Erreur serveur', error: String(e) });
   }
 }
+EOF
